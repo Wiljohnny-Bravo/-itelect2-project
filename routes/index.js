@@ -1,68 +1,119 @@
 import express from "express";
-import { tasks, validateTask, mergeTaskUpdate} from "../src/utils.js"
+import db from "../models/index.cjs";
+
+const { Task, User } = db;
+
+console.log("MODELS LOADED:", Object.keys(db));
+console.log("TASK MODEL:", Task);
+console.log("USER MODEL:", User);
 
 const router = express.Router();
 
-router.get("/tasks", (req, res) => {
-    res.json(tasks);
+router.get("/tasks", async (req, res) => {
+  const tasks = await Task.findAll({
+    include: {
+      model: User,
+      as: "User",
+    },
+    order: [["id", "ASC"]],
+  });
+
+  res.json(tasks);
 });
 
-router.get("/tasks/:id", (req, res) => {
-    const id = Number(req.params.id);
-    const task = tasks.find(task => task.id === id);
+router.get("/tasks/:id", async (req, res) => {
+  const task = await Task.findByPk(req.params.id, {
+    include: {
+      model: User,
+      as: "User",
+    },
+  });
 
-    if (!task) {
-        return res.status(404).json({error: "Task not found"});
+  if (!task) {
+    return res.status(404).json({
+      error: "Task not found",
+    });
+  }
+
+  res.json(task);
+});
+
+router.get("/users", async (req, res) => {
+  const users = await User.findAll({
+    order: [["id", "ASC"]],
+  });
+
+  res.json(users);
+});
+
+router.post("/tasks", async (req, res) => {
+  try {
+    const { title, dueDate, completed, userId } = req.body;
+
+    if (!title || title.trim() === "") {
+      return res.status(400).json({
+        error: "Task title is required",
+      });
     }
 
-    res.json(task);
-});
-
-router.get("/users", (req, res) => {
-    res.json(req.app.locals.users);
-});
-
-let nextId = 4;
-
-router.post("/tasks", (req, res, next) => {
-    if(!validateTask(req.body)) {
-        const err = new Error("title and due date required");
-        err.status = 400;
-        return next(err);
+    if (!dueDate) {
+      return res.status(400).json({
+        error: "Due date is required",
+      });
     }
 
-    const task = { id: nextId++, ...req.body,completed: false};
+    if (userId == null) {
+      return res.status(400).json({
+        error: "User ID is required",
+      });
+    }
 
-    tasks.push(task);
+    const task = await Task.create({
+      title,
+      dueDate,
+      completed: completed ?? false,
+      userId,
+    });
+
     res.status(201).json(task);
+  } catch (error) {
+    console.error("POST /tasks ERROR:", error);
+
+    res.status(500).json({
+      error: "Failed to create task",
+    });
+  }
 });
 
-router.put("/tasks/:id", (req, res, next) => {
-    const id = Number(req.params.id);
-    const index = tasks.findIndex(task => task.id === id);
+router.put("/tasks/:id", async (req, res) => {
+  const task = await Task.findByPk(req.params.id);
 
-    if (index === -1) {
-        const err = new Error("Task not found");
-        err.status = 404;
-        return next(err);
-    }
+  if (!task) {
+    return res.status(404).json({
+      error: "Task not found",
+    });
+  }
 
-    tasks[index] = mergeTaskUpdate(tasks[index], req.body);
+  await task.update(req.body);
 
-    res.status(200).json(tasks[index]); 
+  res.json(task);
 });
 
-router.delete("/tasks/:id", (req, res, next) => {
-    const id = Number(req.params.id);
-    const index = tasks.findIndex(task => task.id === id);
+router.delete("/tasks/:id", async (req, res) => {
+  const task = await Task.findByPk(req.params.id);
 
-    if (index === -1) {
-        const err = new Error("Task not found");
-        err.status = 404;
-        return next(err);
-    }
+  if (!task) {
+    return res.status(404).json({
+      error: "Task not found",
+    });
+  }
 
-    const [removed] = tasks.splice(index, 1);
-    res.status(200).json({message: "Deleted", task: removed })
+  await task.destroy();
+
+  res.json({
+    message: "Deleted",
+    task,
+  });
 });
+
 export default router;
